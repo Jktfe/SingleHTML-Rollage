@@ -38,6 +38,16 @@ JavaScript with **no libraries**. The code is heavily commented in
 plain language, explaining not just *what* it does but *why* each choice was
 made. Open it in a text editor and have a look — it's meant to be read.
 
+## The look
+
+Rollage wears the **TFE** ("There For Everything") house style, taken from the
+design tokens in [tfeSvelteTemplates](https://github.com/Jktfe/tfeSvelteTemplates):
+brand blue `#004695`, Anton headlines, IBM Plex Sans and Mono, thin rules, and
+the ink footer. It follows your system's light/dark setting.
+
+The fonts are the only thing the page fetches from the internet. Offline, it
+falls back to fonts already on your computer, so it still works the same.
+
 ## Try it with
 
 - A photo with strong colours meeting at an edge (they smear into ribbons)

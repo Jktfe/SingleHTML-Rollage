@@ -41,87 +41,349 @@
 <meta charset="UTF-8">
 <!-- Makes the page fit phone screens properly instead of shrinking everything. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rollage</title>
+<title>Rollage — TFE</title>
+<meta name="description" content="Rollage by TFE: mirror, slice and shuffle any picture into a ribbed collage. One file, runs in your browser, nothing uploaded.">
+<!--
+  FONTS — the TFE house typefaces, from Google Fonts:
+    Anton          — the tall, condensed display face for big headlines
+    IBM Plex Sans  — the body text
+    IBM Plex Mono  — the small uppercase "label" text
+  This is the ONLY thing the page fetches from the internet. If you're
+  offline it doesn't matter: every font list below ends with fonts your
+  computer already has, so the app still works — it just looks a bit
+  plainer. Your photos are never sent anywhere either way.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   /*
     ------------------------------------------------------------------
-    LOOK AND FEEL
+    LOOK AND FEEL — the TFE ("There For Everything") house style
     ------------------------------------------------------------------
-    We use CSS "custom properties" (the --variables) so the colours are
-    defined once, at the top. Want a different vibe? Change these five
-    values and the whole app updates.
+    These colours, fonts and sizes are copied from the TFE design tokens
+    (tfe-tokens.css in the tfeSvelteTemplates repo), so Rollage looks
+    like the rest of the TFE family. We use CSS "custom properties"
+    (the --variables) so each value is defined once, up here. Change
+    one and the whole app updates.
+
+    The style in one sentence: white paper, near-black ink, one brand
+    blue, very tall uppercase headlines, small uppercase "typewriter"
+    labels, thin rules instead of heavy boxes, and hardly any rounding.
   */
   :root {
-    --bg: #f5f3ef;          /* warm paper-coloured page background   */
-    --card: #fff;           /* white cards that content sits on      */
-    --ink: #1d2530;         /* main text colour (almost black)       */
-    --muted: #6b7280;       /* grey for hints and captions           */
-    --accent: #0f766e;      /* the teal used for buttons and numbers */
-    --accent-ink: #fff;     /* text colour ON the teal buttons       */
-    --border: #d9d5cc;      /* thin borders around cards             */
+    /* Brand blue, sampled from the official TFE logo. */
+    --tfe-blue: #004695;
+    --tfe-blue-50: #eaf0f9;
+    --tfe-blue-200: #94adda;
+    --tfe-blue-300: #5b82c4;
+    --tfe-blue-700: #002f66;
+
+    /* The ink used for the footer slab, in both light and dark mode. */
+    --tfe-ink: #111315;
+
+    /* "Semantic" colours: named by JOB, not by shade. Dark mode swaps these. */
+    --bg: #ffffff;            /* page background                       */
+    --surface: #ffffff;       /* cards                                 */
+    --surface-2: #f6f6f6;     /* the slightly grey strips and wells    */
+    --fg-1: #111315;          /* main text (near-black ink)            */
+    --fg-2: #4a5158;          /* secondary text                        */
+    --fg-3: #777e85;          /* hints, labels, captions               */
+    --border: #e8e8e8;        /* thin rules and card outlines          */
+    --border-strong: #cfcfcf; /* outlines that need to show up more    */
+    --accent: var(--tfe-blue);/* buttons, numbers, highlights          */
+    --accent-strong: var(--tfe-blue-700);
+    --accent-soft: var(--tfe-blue-50);
+    --error: #b3502c;         /* TFE "rust" — warm, not alarm-red      */
+    --focus-ring: 0 0 0 3px rgba(0, 70, 149, .3);
+
+    /* Fonts (see the note in <head> about the fall-backs at the end). */
+    --font-display: 'Anton', 'Oswald', 'Bebas Neue', Impact, 'Arial Narrow', sans-serif;
+    --font-sans: 'IBM Plex Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+    /* TFE corners are restrained: 4px, never bubbly. */
+    --r: 4px;
+    --ease: cubic-bezier(.4, 0, .2, 1);
+    --fast: 120ms;
+    --container: 1320px;
   }
+
+  /*
+    DARK MODE. If your computer is set to dark mode, these replace the
+    light values above. Because everything else uses the job-named
+    variables, nothing else needs to change.
+  */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315;
+      --surface: #18191c;
+      --surface-2: #1f2125;
+      --fg-1: #f6f5f1;
+      --fg-2: #c8cbcd;
+      --fg-3: #8a8e92;
+      --border: #2a2d31;
+      --border-strong: #3a3e43;
+      --accent: var(--tfe-blue-300);
+      --accent-strong: var(--tfe-blue-200);
+      --accent-soft: rgba(91, 130, 196, .14);
+      --error: #e08a63;
+    }
+  }
+
   * { box-sizing: border-box; } /* makes widths and padding behave predictably */
+  html { overflow-x: clip; }
   body {
     margin: 0;
-    /*
-      A serif font (like a book) suits a craft-tool page. If Georgia is
-      missing (rare), the browser falls back to any serif it has.
-    */
-    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
     background: var(--bg);
-    color: var(--ink);
-    display: flex;
-    justify-content: center;       /* centre the app horizontally */
-    padding: 2rem 1rem 4rem;
+    color: var(--fg-1);
+    -webkit-font-smoothing: antialiased;
   }
-  main { width: min(960px, 100%); } /* never wider than 960px, but shrink on phones */
-  h1 { font-size: 2rem; margin: 0 0 .25rem; letter-spacing: .02em; }
-  p.lede { color: var(--muted); margin: 0 0 1.5rem; }
+  ::selection { background: var(--tfe-blue); color: #fff; }
+
+  /* Every section's content sits in the same centred column. */
+  .wrap { width: 100%; max-width: var(--container); margin: 0 auto; padding: 0 32px; }
+  @media (max-width: 720px) { .wrap { padding: 0 16px; } }
+
+  /*
+    "Eyebrow" labels — the small, spaced-out, uppercase typewriter text
+    you see above headings and on captions. It's a TFE signature.
+  */
+  .eyebrow, .mono {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--fg-3);
+  }
+
+  /* Hides something on screen but keeps it readable for screen readers. */
+  .visually-hidden {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  /* ============ TOP BAR ============ */
+  /*
+    Sticks to the top as you scroll. The see-through white plus blur
+    ("backdrop-filter") lets the page show faintly underneath.
+  */
+  .t-nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .t-nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 16px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 12px;
+    color: var(--fg-1); text-decoration: none;
+    font-weight: 600; font-size: 15px; letter-spacing: .01em;
+  }
+  .brand svg { width: 44px; height: auto; color: var(--accent); display: block; }
+  .brand .slash { color: var(--fg-3); font-weight: 400; margin: 0 .15em; }
+  .t-nav__right { display: flex; align-items: center; gap: 20px; }
+  @media (max-width: 560px) { .t-nav__right .mono { display: none; } }
+
+  /* ============ BUTTONS ============ */
+  /*
+    TFE buttons: near-square corners, medium weight, a little letter
+    spacing. The main ("primary") button is ink and turns brand-blue on
+    hover; "ghost" buttons are just an outline.
+  */
+  button, .t-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: .02em;
+    line-height: 1.2;
+    padding: 13px 22px;
+    border-radius: var(--r);
+    border: 1px solid var(--fg-1);
+    background: var(--fg-1);
+    color: var(--bg);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  button:hover:not(:disabled), .t-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.ghost, .t-btn.ghost { background: transparent; color: var(--fg-1); border-color: var(--border-strong); }
+  button.ghost:hover:not(:disabled), .t-btn.ghost:hover { background: var(--surface-2); border-color: var(--fg-1); color: var(--fg-1); }
+  .t-btn.sm { padding: 9px 14px; font-size: 13px; }
+  button:disabled { opacity: .4; cursor: default; }             /* greyed out when unusable */
+  /* Keyboard users get a soft blue glow instead of the browser's default outline. */
+  button:focus-visible, .t-btn:focus-visible, a:focus-visible, input:focus-visible {
+    outline: none; box-shadow: var(--focus-ring);
+  }
+  .arrow { display: inline-block; transition: transform var(--fast); }
+  .t-btn:hover .arrow { transform: translateX(2px); }
+
+  /* ============ HERO ============ */
+  .t-hero { border-bottom: 1px solid var(--border); }
+  .t-hero .wrap { padding-top: 56px; padding-bottom: 72px; }
+  /* The row of small labels across the top, underlined by a thin rule. */
+  .t-hero__meta {
+    display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+    padding-bottom: 16px; margin-bottom: 48px;
+    border-bottom: 1px solid var(--border);
+  }
+  .t-hero__meta b { color: var(--fg-1); font-weight: 500; }
+  /*
+    The giant headline. clamp(min, preferred, max) means "scale with the
+    window width, but never smaller than 52px or bigger than 168px".
+  */
+  .t-hero h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(52px, 10.5vw, 168px);
+    line-height: .92;
+    letter-spacing: .005em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .t-hero h1 .accent { color: var(--accent); }
+  /* Hollow letters: transparent fill with an ink outline. */
+  .t-hero h1 .outline { color: transparent; -webkit-text-stroke: 1.5px var(--fg-1); }
+  .t-hero__rule { height: 1px; background: var(--border); margin: 48px 0 36px; }
+  .t-hero__sub { display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: end; }
+  .lede {
+    font-size: clamp(18px, 1.6vw, 21px);
+    line-height: 1.55;
+    font-weight: 300;
+    color: var(--fg-2);
+    max-width: 56ch;
+    margin: 0;
+  }
+  .lede em { font-style: normal; font-weight: 500; color: var(--fg-1); }
+  .t-hero__actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+  /* On phones: a smaller headline with a touch more line space, and one meta label. */
+  @media (max-width: 560px) {
+    .t-hero h1 { font-size: 46px; line-height: 1; }
+    .t-hero__meta span:not(:first-child) { display: none; }
+    .t-hero .wrap { padding-top: 40px; }
+  }
+  @media (max-width: 860px) {
+    .t-hero__sub { grid-template-columns: 1fr; gap: 28px; }
+    .t-hero__actions { justify-content: flex-start; }
+  }
+
+  /* ============ TICKER ============ */
+  /*
+    A slow scrolling strip of facts. The list is written out TWICE in the
+    HTML; we slide it left by exactly half its width and loop, so the
+    second copy lands where the first began and the join is invisible.
+  */
+  .t-ticker {
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    padding: 13px 0;
+  }
+  .t-ticker__track { display: flex; width: max-content; animation: ticker 50s linear infinite; }
+  .t-ticker__track span { padding-right: 48px; white-space: nowrap; }
+  .t-ticker__track .dot { color: var(--tfe-blue-300); padding-right: 48px; }
+  @keyframes ticker { to { transform: translateX(-50%); } }
+  /* People who ask their computer for less motion get a still strip. */
+  @media (prefers-reduced-motion: reduce) { .t-ticker__track { animation: none; } }
+
+  /* ============ SECTION HEADINGS ============ */
+  /* scroll-margin stops "jump to" links hiding the heading under the sticky top bar. */
+  .section { scroll-margin-top: 64px; padding: 80px 0; border-bottom: 1px solid var(--border); }
+  .section-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 40px; }
+  .section-head .eyebrow { margin-bottom: 14px; }
+  .section-head h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(40px, 5vw, 72px);
+    line-height: .96;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .section-head h2 .accent { color: var(--accent); }
+  .section-head p { margin: 0; max-width: 44ch; color: var(--fg-2); font-size: 15px; }
+  @media (max-width: 720px) { .section { padding: 56px 0; } }
+
+  /* ============ THE WORKBENCH ============ */
+  /*
+    Controls on the left, pictures on the right. The controls column
+    "sticks" while you scroll, so the sliders stay in reach while you
+    look at a tall output. On narrow screens it all stacks.
+  */
+  .bench { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 960px) { .bench { grid-template-columns: 1fr; } }
+
   .card {
-    background: var(--card);
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.25rem;
+    border-radius: var(--r);
   }
-  .controls { display: grid; gap: 1.1rem; }
-  label { display: block; font-weight: 600; margin-bottom: .35rem; }
-  input[type="file"] { font-family: inherit; }
+  .controls { position: sticky; top: 88px; }
+  @media (max-width: 960px) { .controls { position: static; } }
+  /* Each control is a numbered row, divided by thin rules. */
+  .control { padding: 22px 24px; border-bottom: 1px solid var(--border); }
+  .control:last-child { border-bottom: 0; }
+  .control-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .control-head label, .control-head .label {
+    font-weight: 600; font-size: 15px; color: var(--fg-1);
+  }
+  .control-head .eyebrow { color: var(--accent); }
 
   /*
     The error box starts hidden (display: none) and JavaScript reveals it
     when something goes wrong, e.g. you tried an HEIC iPhone photo that
     the browser cannot decode.
   */
-  .error { color: #b91c1c; font-size: .9rem; margin-top: .4rem; display: none; }
+  .error { color: var(--error); font-size: 13px; margin-top: 10px; display: none; }
 
   /*
-    The dashed drop zone: a friendly second way to add an image. It lights
-    up (.over) when you drag a file over it, so you know drop will work.
+    The drop zone. It's a <label> for the (hidden) file picker, so you
+    can click it to browse OR drag a picture onto it. It lights up blue
+    (.over) when a file is dragged over it, so you know drop will work.
   */
   .dropzone {
-    margin-top: .6rem;
-    border: 2px dashed var(--border);
-    border-radius: 10px;
-    padding: .9rem;
+    display: block;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r);
+    padding: 22px 16px;
     text-align: center;
-    color: var(--muted);
-    font-size: .9rem;
+    color: var(--fg-2);
+    font-size: 14px;
+    background: var(--surface-2);
+    cursor: pointer;
+    transition: border-color var(--fast), background var(--fast), color var(--fast);
   }
-  .dropzone.over { border-color: var(--accent); color: var(--accent); background: #f0faf8; }
+  .dropzone strong { color: var(--fg-1); font-weight: 600; }
+  .dropzone .mono { display: block; margin-top: 6px; font-size: 10px; }
+  .dropzone:hover { border-color: var(--fg-1); }
+  .dropzone.over { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  /* The real file input is hidden, so show its keyboard focus on the drop zone. */
+  #file:focus-visible + .dropzone { box-shadow: var(--focus-ring); border-color: var(--accent); }
 
   /*
-    The Cuts slider: number sits beside the slider. tabular-nums means
-    every digit is the same width, so "8" -> "128" doesn't make the
-    number jiggle sideways.
+    The big numbers beside the Cuts slider and inside the stepper.
+    tabular-nums means every digit is the same width, so "8" -> "128"
+    doesn't make the number jiggle sideways.
   */
-  .slider-row { display: flex; align-items: center; gap: .9rem; }
-  .slider-row output {
-    min-width: 3ch;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
+  .readout {
+    font-family: var(--font-display);
+    font-size: 34px;
+    line-height: 1;
     color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    min-width: 3ch;
+    text-align: right;
   }
+  .slider-row { display: flex; align-items: center; gap: 16px; }
+  /* accent-color recolours the browser's own slider in one line. */
+  .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); min-width: 0; }
 
   /*
     The Steps stepper (the − and + buttons).
@@ -129,71 +391,43 @@
     each one is a big, meaningful change — like oven settings. Buttons
     make each increase feel deliberate, and you can't overshoot.
   */
-  .stepper { display: flex; align-items: center; gap: .9rem; }
-  .stepper button {
-    width: 2.2rem; height: 2.2rem;
-    padding: 0;
-    border-radius: 50%;
-    font-size: 1.2rem;
-    line-height: 1;
-  }
-  .stepper output {
-    min-width: 3ch;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--accent);
-  }
+  .stepper { display: flex; align-items: center; gap: 16px; }
+  .stepper button { width: 42px; height: 42px; padding: 0; font-size: 20px; font-weight: 400; }
+  .stepper .readout { text-align: center; min-width: 2.2ch; }
 
-  .hint { font-size: .85rem; color: var(--muted); margin-top: .2rem; }
-  .actions { display: flex; gap: .75rem; margin-top: 1rem; }
-  button {
-    font: inherit;
-    font-weight: 700;
-    padding: .55rem 1.1rem;
-    border-radius: 999px;           /* pill-shaped buttons */
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: var(--accent-ink);
-    cursor: pointer;
-  }
-  button.ghost { background: transparent; color: var(--accent); } /* outline-only style */
-  button:disabled { opacity: .45; cursor: default; }              /* greyed out when unusable */
+  .hint { font-size: 13px; color: var(--fg-3); margin-top: 10px; line-height: 1.5; }
+  .actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 20px 24px; background: var(--surface-2); border-top: 1px solid var(--border); }
 
-  /* The two big panes (Panels and Output) sit side by side on wide screens… */
-  .panes { display: grid; gap: 1.25rem; grid-template-columns: 1fr 1fr; }
-  /* …and stack on top of each other on narrow ones (like phones). */
-  @media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
+  /* The two picture panes (Panels and Output) sit side by side… */
+  .panes { display: grid; gap: 24px; grid-template-columns: 1fr 1fr; }
+  /* …and stack on top of each other on narrower screens (like phones). */
+  @media (max-width: 1180px) and (min-width: 961px), (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
 
-  figure { margin: 0; }
-  figcaption { font-size: .85rem; color: var(--muted); margin-bottom: .5rem; }
+  figure { margin: 0; padding: 16px; }
+  /* "FIG. 01 / PANELS" — captions styled like a printed manual. */
+  figcaption { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  figcaption .eyebrow b { color: var(--fg-1); font-weight: 500; }
+  .figcap-note { font-size: 13px; color: var(--fg-3); margin: 12px 2px 0; line-height: 1.5; }
 
   /*
     The checkerboard background behind images is the classic "this area is
     transparent" signal used by art programs. Here it just says "picture
-    goes here". It's pure CSS — a repeating 16px chequer pattern.
+    goes here". It's pure CSS — a repeating 16px chequer pattern, drawn
+    in two greys that come from the page's own colours.
   */
   .imgwrap {
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 2px;
     overflow: hidden;
-    background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+    background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
     display: flex; align-items: center; justify-content: center;
-    min-height: 160px;
+    aspect-ratio: 1 / 1;
   }
-  .imgwrap canvas { max-width: 100%; height: auto; display: block; }
-  .placeholder { color: var(--muted); font-size: .9rem; padding: 2rem; }
-
-  /* The footer link back to the source code. Small and quiet — it's info,
-     not a call to action. */
-  footer {
-    text-align: center;
-    font-size: .85rem;
-    color: var(--muted);
-    margin-top: 2rem;
+  .imgwrap canvas { max-width: 100%; max-height: 100%; height: auto; display: block; }
+  .placeholder {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--fg-3); padding: 2rem; text-align: center;
   }
-  footer a { color: var(--accent); }
 
   /*
     THE PANEL GRID — the four mirrored quadrants, each one clickable.
@@ -203,23 +437,27 @@
   .panelgrid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: .5rem;
+    gap: 6px;
     width: 100%;
-    padding: .5rem;
+    padding: 6px;
+    align-self: stretch;
   }
   .panel {
     position: relative;
+    display: block;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 2px;
     padding: 0;
     background: none;
     cursor: pointer;
     overflow: hidden;
   }
-  .panel:hover { border-color: var(--accent); } /* highlight the panel you're pointing at */
+  /* highlight the panel you're pointing at with a brand-blue frame */
+  .panel:hover:not(:disabled) { border-color: var(--accent); background: none; box-shadow: inset 0 0 0 2px var(--accent); }
   .panel img {
     display: block;
     width: 100%;
+    height: 100%;
     aspect-ratio: 1 / 1;   /* every thumbnail is a square… */
     object-fit: cover;     /* …filled edge to edge, cropping the overflow */
   }
@@ -235,77 +473,246 @@
   .panel img.flipb { transform: scale(-1, -1); }
   .panel .cap {
     position: absolute;
-    left: 0; right: 0; bottom: 0;
-    padding: .2rem .45rem;
-    font-size: .72rem;
-    color: #fff;
-    background: rgba(0, 0, 0, .55); /* dark ribbon so the label reads over any image */
+    left: 0; bottom: 0;
+    padding: 4px 8px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #f6f5f1;
+    background: rgba(17, 19, 21, .72); /* an ink tag so the label reads over any image */
     text-align: left;
   }
+
+  /* ============ HOW IT WORKS ============ */
+  /* Four numbered steps, like an instruction manual. */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--fg-1); margin: 0; padding: 0; }
+  .steps li { list-style: none; padding: 24px 24px 8px 0; border-right: 1px solid var(--border); }
+  .steps li + li { padding-left: 24px; }
+  .steps li:last-child { border-right: 0; }
+  .steps .num { font-family: var(--font-display); font-size: 56px; line-height: 1; color: var(--accent); display: block; margin-bottom: 16px; }
+  .steps h3 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+  .steps p { font-size: 14px; color: var(--fg-2); margin: 0; }
+  .steps code { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg-1); background: var(--surface-2); padding: 1px 5px; border-radius: 2px; }
+  @media (max-width: 960px) {
+    .steps { grid-template-columns: 1fr 1fr; }
+    .steps li, .steps li + li { padding: 24px 24px 24px 0; border-right: 0; border-bottom: 1px solid var(--border); }
+    .steps li:nth-child(even) { padding-left: 24px; border-left: 1px solid var(--border); }
+  }
+  @media (max-width: 560px) {
+    .steps { grid-template-columns: 1fr; }
+    .steps li:nth-child(even) { padding-left: 0; border-left: 0; }
+  }
+
+  /* ============ FOOTER ============ */
+  /*
+    The TFE "ink slab": a near-black block that closes every TFE page,
+    whatever the colour scheme. It holds the link back to the source —
+    info, not a call to action, so it stays quiet.
+  */
+  footer { background: var(--tfe-ink); color: #c8cbcd; padding: 72px 0 28px; }
+  .t-foot__top { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 48px; padding-bottom: 48px; border-bottom: 1px solid #2a2d31; }
+  .t-foot__brand svg { width: 64px; height: auto; color: #f6f5f1; display: block; margin-bottom: 20px; }
+  .t-foot__brand h3 { font-family: var(--font-display); font-weight: 400; font-size: 28px; text-transform: uppercase; letter-spacing: .02em; color: #f6f5f1; margin: 0 0 8px; }
+  .t-foot__brand p { font-size: 14px; color: #8a8e92; margin: 0; max-width: 40ch; line-height: 1.55; }
+  footer h4 { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: #8a8e92; margin: 0 0 16px; }
+  footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 14px; }
+  footer a { color: #c8cbcd; text-decoration: none; transition: color var(--fast); }
+  footer a:hover { color: #fff; }
+  .t-foot__bottom { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 28px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #6a6e72; }
+  @media (max-width: 720px) { .t-foot__top { grid-template-columns: 1fr; gap: 32px; } }
 </style>
 </head>
 <body>
-<main>
-  <h1>Rollage</h1>
-  <p class="lede">Mirror an image into four panels, slice it into strips, and interleave them from the ends inward.</p>
+<!--
+  THE TFE LOGO, drawn once here as an invisible "symbol" and then reused
+  (with <use>) in the top bar and the footer. fill="currentColor" means
+  the logo takes the text colour of wherever it's placed: blue in the
+  top bar, white on the dark footer.
+-->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="tfe-logo" viewBox="0 0 200 86.5" fill="currentColor">
+    <rect x=".3" width="20.7" height="23.1"></rect>
+    <rect x="25.2" width="66.7" height="23.1"></rect>
+    <rect x="25.2" y="32.4" width="41.3" height="22.1"></rect>
+    <rect x="25.2" y="63.5" width="22.4" height="23.1"></rect>
+    <rect x="51.7" y="63.5" width="14.1" height="23.1"></rect>
+    <rect x="69.8" y="63.5" width="22.4" height="23.1"></rect>
+    <path d="m109.7 3.1h-1.9v19.9h-3.8v-19.9h-2.7v-3.1h8.6l-0.2 3.1z"></path>
+    <path d="m121.1 0v23h-3.4v-9.9h-2.7v9.9h-3.5v-23h3.5v9.4h2.9v-9.4h3.2z"></path>
+    <path d="m127.3 3.1v6.3h3.1v3.4h-3.1v6.6h3.1v3.6h-6.3v-23h6.3v3l-3.1 0.1z"></path>
+    <path d="m139.4 23-3.2-8.6v8.5h-3.5v-22.9h6.3c1.4 0 2.8 0.8 2.8 2.7v7.9c0 1.7-1.9 2.6-2.3 2.6l2.7 9.8h-3.6zm-3.2-13.4h2.2l0.1-6.4h-2.3v6.4z"></path>
+    <path d="m147.8 3.1v6.3h2.9v3.4h-2.9v6.7h3.2v3.5h-6.1v-23h6l0.1 3.1h-3.2z"></path>
+    <path d="m81.3 35.5v5.8h2.9v3.7h-2.9v9.5h-3.3v-22h6.3l0.1 3h-3.1z"></path>
+    <path d="m94.9 34.6v17.5c0 1.3-1 2.4-2.3 2.4h-4.6c-1.3 0-2.4-1-2.4-2.3v-17.5c0-1.3 1.1-2.4 2.4-2.4h4.6c1.3 0 2.3 1 2.3 2.3zm-3.3 0.9h-2.6v15.8h2.6v-15.8z"></path>
+    <path d="m103.1 54.5-2.3-8.2v8.2h-3.4v-22h6.2c1.4 0 2.6 1 2.7 2.4v7.6c0 1.7-1 2.5-2.3 2.5l2.6 9.4-3.5 0.1zm-2.3-12.5h2c0.2 0 0.2-0.1 0.2-0.4v-5.6c0-0.2-0.1-0.4-0.3-0.4h-1.9v6.4z"></path>
+    <path d="m105.9 66.7v5.8h3v3.6h-2.9v6.8h3v3.3h-6.3v-22.7h6.1l0.1 3.1-3 0.1z"></path>
+    <path d="m121.2 63.5-3.7 22.8h-3.7l-4.1-22.8h3.7l2.2 13.1 2.1-13.1h3.5z"></path>
+    <path d="m125.9 66.7v5.9h2.9v3.5h-2.9v6.8h2.9v3.3h-6.2v-22.7h6.2v3.1l-2.9 0.1z"></path>
+    <path d="m137.3 86.3-2.7-8.8v8.8h-3.6v-22.8h6.7c1.4 0 2.6 1 2.6 2.4v7.9c0 1.7-2.2 2.6-2.3 2.6l2.7 9.9h-3.4zm-2.8-13.6h2.3l0.1-6h-2.4v6z"></path>
+    <path d="m150.9 65.1-3.1 13.2v8h-3.5v-8l-3.3-14.8h3.4l1.4 7.4 1.5-7.5h3.5l0.1 1.7z"></path>
+    <path d="m159.4 66.7h-2.4v19.6h-3.3v-19.6h-2.4l-0.1-3.1h8.4l-0.2 3.1z"></path>
+    <path d="m171.1 63.5v22.8h-3.6v-10.2h-2.9v10.2h-3.7v-22.8h3.6v9.1h2.9v-9.1h3.7z"></path>
+    <path d="m177.2 63.5v22.8h-3.4v-22.8h3.4z"></path>
+    <path d="m189 63.5v22.8h-3l-2.6-10.6-0.2 1.7v8.9h-3.2v-22.8h3.3l2.5 9.6 0.2-1.4v-8.2h3z"></path>
+    <path d="m197.2 69.4v-2.9h-2.5v16.4h2.5v-5.6h-0.9l-0.1-3.4h3.5v10c0 2-1.4 2.6-2.7 2.6h-3c-1.3 0-2.6-0.8-2.6-2.3v-18.5c0-1.2 1-2.3 2.2-2.3h4c1.3 0 2.4 1 2.4 2.3v3.7h-2.8z"></path>
+  </symbol>
+</svg>
 
-  <!--
-    ==========================================================================
-    THE CONTROLS
-    ==========================================================================
-    Three things the user chooses:
-      Image — which picture(s) to roll
-      Cuts  — how many strips to slice per pass (2–256)
-      Steps — how many times to repeat the slice-and-shuffle (1–32)
-  -->
-  <section class="card controls">
-    <div>
-      <label for="file">Image</label>
-      <!--
-        The "accept" list matters: these are the image formats every modern
-        browser can read. We deliberately do NOT accept HEIC (iPhone photos)
-        because Chrome and Firefox cannot decode it — trying would just fail
-        silently. Better to say no up front than to fail mysteriously.
-      -->
-      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp">
-      <!-- A hidden second file picker, used for replacing ONE panel at a time. -->
-      <input type="file" id="panelFile" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp" hidden>
-      <div class="dropzone" id="dropzone">…or drag an image file here</div>
-      <div class="error" id="imgError"></div>
+<header class="t-nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Rollage by TFE — back to top">
+      <svg viewBox="0 0 200 86.5" aria-hidden="true"><use href="#tfe-logo"/></svg>
+      <span>TFE<span class="slash">/</span>Rollage</span>
+    </a>
+    <div class="t-nav__right">
+      <span class="mono">Single-file tool · Runs offline</span>
+      <a class="t-btn ghost sm" href="https://github.com/Jktfe/SingleHTML-Rollage" target="_blank" rel="noopener noreferrer">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
     </div>
-    <div>
-      <label for="cuts">Cuts</label>
-      <div class="slider-row">
-        <input type="range" id="cuts" min="2" max="256" value="8">
-        <output id="cutsOut">8</output>
+  </div>
+</header>
+
+<section class="t-hero" id="top">
+  <div class="wrap">
+    <div class="t-hero__meta mono">
+      <span><b>TFE</b> — Rollage</span>
+      <span>One file · No uploads · No libraries</span>
+      <span>Mirror · Slice · Shuffle</span>
+    </div>
+    <h1>
+      Roll any<br>
+      <span class="outline">picture into</span><br>
+      <span class="accent">ribbons.</span>
+    </h1>
+    <div class="t-hero__rule"></div>
+    <div class="t-hero__sub">
+      <p class="lede">
+        <em>Mirror an image into four panels, slice it into strips, and interleave them from the ends inward.</em>
+        Everything happens in your browser — your photos never leave your machine.
+      </p>
+      <div class="t-hero__actions">
+        <!-- A <label> for the file picker, dressed as a button: clicking it opens the picker. -->
+        <label class="t-btn" for="file">Choose an image <span class="arrow" aria-hidden="true">→</span></label>
+        <a class="t-btn ghost" href="#how">How it works <span class="arrow" aria-hidden="true">↓</span></a>
       </div>
-      <div class="hint">How many strips each pass slices the image into.</div>
     </div>
-    <div>
-      <label>Steps</label>
-      <div class="stepper">
-        <button type="button" id="stepsDown" aria-label="Fewer steps">−</button>
-        <output id="stepsOut">1</output>
-        <button type="button" id="stepsUp" aria-label="More steps">+</button>
+  </div>
+</section>
+
+<div class="t-ticker mono" aria-hidden="true">
+  <div class="t-ticker__track">
+    <span>Mirror into four</span><span class="dot">●</span><span>Slice into strips</span><span class="dot">●</span><span>Shuffle from the ends in</span><span class="dot">●</span><span>Turn 90° and repeat</span><span class="dot">●</span><span>Nothing uploaded</span><span class="dot">●</span><span>One HTML file</span><span class="dot">●</span><span>Built in Britain</span><span class="dot">●</span>
+    <span>Mirror into four</span><span class="dot">●</span><span>Slice into strips</span><span class="dot">●</span><span>Shuffle from the ends in</span><span class="dot">●</span><span>Turn 90° and repeat</span><span class="dot">●</span><span>Nothing uploaded</span><span class="dot">●</span><span>One HTML file</span><span class="dot">●</span><span>Built in Britain</span><span class="dot">●</span>
+  </div>
+</div>
+
+<main>
+  <section class="section" id="make">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">01 — The workbench</div>
+          <h2>Make a <span class="accent">Rollage.</span></h2>
+        </div>
+        <p>Pick a picture, then play with the two dials. The preview redraws as you go.</p>
       </div>
-      <div class="hint">How many times the slice-and-interleave pass is repeated (vertical + horizontal per step). Range 1–32.</div>
-    </div>
-    <div class="actions">
-      <button id="download" disabled>Download PNG</button>
-      <button id="reset" class="ghost" disabled>Reset</button>
+
+      <div class="bench">
+        <!--
+          ==========================================================================
+          THE CONTROLS
+          ==========================================================================
+          Three things the user chooses:
+            Image — which picture(s) to roll
+            Cuts  — how many strips to slice per pass (2–256)
+            Steps — how many times to repeat the slice-and-shuffle (1–32)
+        -->
+        <section class="card controls" aria-label="Rollage settings">
+          <div class="control">
+            <div class="control-head">
+              <span class="label">Image</span>
+              <span class="eyebrow">01</span>
+            </div>
+            <!--
+              The "accept" list matters: these are the image formats every modern
+              browser can read. We deliberately do NOT accept HEIC (iPhone photos)
+              because Chrome and Firefox cannot decode it — trying would just fail
+              silently. Better to say no up front than to fail mysteriously.
+
+              The real picker is visually hidden; the drop zone below is its
+              label, so clicking the zone opens it.
+            -->
+            <input type="file" id="file" class="visually-hidden" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp">
+            <label class="dropzone" id="dropzone" for="file">
+              <strong>Drop an image here</strong> or click to browse
+              <span class="mono">PNG · JPEG · WebP · GIF · AVIF</span>
+            </label>
+            <!-- A hidden second file picker, used for replacing ONE panel at a time. -->
+            <input type="file" id="panelFile" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp" hidden>
+            <div class="error" id="imgError" role="alert"></div>
+          </div>
+          <div class="control">
+            <div class="control-head">
+              <label for="cuts">Cuts</label>
+              <span class="eyebrow">02</span>
+            </div>
+            <div class="slider-row">
+              <input type="range" id="cuts" min="2" max="256" value="8">
+              <output id="cutsOut" class="readout" for="cuts">8</output>
+            </div>
+            <div class="hint">How many strips each pass slices the image into.</div>
+          </div>
+          <div class="control">
+            <div class="control-head">
+              <span class="label" id="stepsLabel">Steps</span>
+              <span class="eyebrow">03</span>
+            </div>
+            <div class="stepper" role="group" aria-labelledby="stepsLabel">
+              <button type="button" id="stepsDown" class="ghost" aria-label="Fewer steps">−</button>
+              <output id="stepsOut" class="readout" aria-live="polite">1</output>
+              <button type="button" id="stepsUp" class="ghost" aria-label="More steps">+</button>
+            </div>
+            <div class="hint">How many times the slice-and-interleave pass is repeated (vertical + horizontal per step). Range 1–32.</div>
+          </div>
+          <div class="actions">
+            <button id="download" disabled>Download PNG <span aria-hidden="true">↓</span></button>
+            <button id="reset" class="ghost" disabled>Reset</button>
+          </div>
+        </section>
+
+        <div class="panes">
+          <figure class="card">
+            <figcaption><span class="eyebrow"><b>Fig. 01</b> / Panels</span><span class="eyebrow">Click to swap</span></figcaption>
+            <div class="imgwrap" id="panelsWrap"><span class="placeholder">Choose an image to begin</span></div>
+            <p class="figcap-note">The four mirrored quadrants. Click one to swap in a different image and roll four images into one.</p>
+          </figure>
+          <figure class="card">
+            <figcaption><span class="eyebrow"><b>Fig. 02</b> / Rollage output</span><span class="eyebrow">Live</span></figcaption>
+            <div class="imgwrap" id="outWrap"><span class="placeholder">Output appears here</span></div>
+            <p class="figcap-note">Same settings always give the same picture. Download saves it at full size.</p>
+          </figure>
+        </div>
+      </div>
     </div>
   </section>
 
-  <div class="panes">
-    <figure class="card">
-      <figcaption>Panels — the four mirrored quadrants. Click one to swap in a different image and roll four images into one.</figcaption>
-      <div class="imgwrap" id="panelsWrap"><span class="placeholder">Choose an image to begin</span></div>
-    </figure>
-    <figure class="card">
-      <figcaption>Rollage output</figcaption>
-      <div class="imgwrap" id="outWrap"><span class="placeholder">Output appears here</span></div>
-    </figure>
-  </div>
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">02 — How it works</div>
+          <h2>Four moves, <span class="accent">on repeat.</span></h2>
+        </div>
+        <p>A rollage is an old paper-craft trick: cut a picture into strips and weave it back together. This page just does it faster.</p>
+      </div>
+      <ol class="steps">
+        <li><span class="num">01</span><h3>Mirror</h3><p>The picture is mirrored into four panels, like folding paper before cutting a snowflake, so every edge matches its neighbour.</p></li>
+        <li><span class="num">02</span><h3>Slice</h3><p>The mirrored base is cut into <em>Cuts</em> vertical strips.</p></li>
+        <li><span class="num">03</span><h3>Shuffle</h3><p>Strips are re-ordered from the ends inward: <code>1 8 2 7 3 6 4 5</code>.</p></li>
+        <li><span class="num">04</span><h3>Turn &amp; repeat</h3><p>The same trick runs on the rows, then the whole thing repeats <em>Steps</em> times.</p></li>
+      </ol>
+    </div>
+  </section>
 </main>
 
 <!--
@@ -313,7 +720,33 @@
   read the source code (it's all in this one file anyway!).
 -->
 <footer>
-  Rollage is a single-file app — <a href="https://github.com/Jktfe/SingleHTML-Rollage">view the source on GitHub</a>.
+  <div class="wrap">
+    <div class="t-foot__top">
+      <div class="t-foot__brand">
+        <svg viewBox="0 0 200 86.5" role="img" aria-label="TFE"><use href="#tfe-logo"/></svg>
+        <h3>There For Everything.</h3>
+        <p>Rollage is a single-file app — open it in a text editor and read it. The comments explain every choice in plain language.</p>
+      </div>
+      <div>
+        <h4>Source</h4>
+        <ul>
+          <li><a href="https://github.com/Jktfe/SingleHTML-Rollage" target="_blank" rel="noopener noreferrer">View the source on GitHub</a></li>
+          <li><a href="https://github.com/Jktfe/SingleHTML-Rollage/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Built by</h4>
+        <ul>
+          <li><a href="https://github.com/Jktfe" target="_blank" rel="noopener noreferrer">@Jktfe</a></li>
+          <li><a href="https://tfeltd.com" target="_blank" rel="noopener noreferrer">TFE Ltd</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="t-foot__bottom">
+      <span>© TFE Ltd</span>
+      <span>Plain HTML · CSS · JavaScript</span>
+    </div>
+  </div>
 </footer>
 
 <script>
