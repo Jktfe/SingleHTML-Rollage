@@ -825,6 +825,26 @@
   const STEPS_MIN = 1, STEPS_MAX = 32;
 
   /*
+    SIZE LIMITS — why we shrink big photos.
+    The mirrored base is TWICE the photo's width and height, so a 4000px
+    photo becomes an 8000×8000 canvas: 64 million pixels, about 256MB of
+    memory for each copy. Two problems with that:
+      - iPhones and iPads refuse any canvas bigger than about 16.7 million
+        pixels (4096×4096) and just draw nothing — a blank output.
+      - Redrawing something that big on every slider wiggle is sluggish.
+    So we work at two sizes:
+      PREVIEW_MAX_SIDE  — the on-screen preview is at most 2048px across.
+                          Plenty for a screen, and quick to redraw.
+      EXPORT_MAX_PIXELS — the downloaded PNG is as big as your photos
+                          allow, up to 4096×4096's worth of pixels, which
+                          every browser (iPhones included) can handle.
+    The shuffle works in fractions of the image, not in pixels, so the
+    preview and the download are the SAME picture, just at different sizes.
+  */
+  const PREVIEW_MAX_SIDE = 2048;
+  const EXPORT_MAX_PIXELS = 4096 * 4096;
+
+  /*
     The changeable memory:
     - panels[]    : the decoded image for each of the 4 slots (null = empty)
     - panelUrls[] : a "blob URL" per slot — a special web address the browser
@@ -841,6 +861,13 @@
   let outCanvas = null;
   let replaceSlot = null;
   let rafPending = false;
+  /*
+    loadGen counts image loads. Loading a photo takes a moment, so each
+    load remembers the number it started with; if another load (or a
+    Reset) happens before it finishes, the numbers no longer match and the
+    late arrival is quietly thrown away instead of undoing what you did.
+  */
+  let loadGen = 0;
   let panelButtons = [];
 
   /* ---------------------------------------------------------------------------
@@ -907,11 +934,10 @@
     142.857px strips). Canvas copes with fractions smoothly, so we don't
     bother rounding. No glitches, no maths headaches.
   */
-  function interleavePass(src, numCuts, axis) {
+  function interleavePass(src, dest, numCuts, axis) {
     const w = src.width, h = src.height;
-    const dest = document.createElement('canvas'); // a fresh, invisible canvas
-    dest.width = w; dest.height = h;
     const dctx = dest.getContext('2d');
+    dctx.clearRect(0, 0, w, h); // wipe last pass's picture off this canvas
     const map = interleaveMap(numCuts);
     for (let i = 0; i < numCuts; i++) {
       const s0 = map[i];
@@ -961,9 +987,21 @@
     twice as tall as a single cell. All cells are the same size — the largest
     of the four images wins — so the grid stays tidy even with mixed photos.
   */
-  function buildBase() {
-    const cellW = Math.max.apply(null, panels.map(p => p.naturalWidth));
-    const cellH = Math.max.apply(null, panels.map(p => p.naturalHeight));
+  /*
+    maxSide / maxPixels are the size limits from PART 2. If the four
+    photos would make a base bigger than that, we shrink the cells (keeping
+    their shape) until it fits. Small photos are never blown up.
+  */
+  function buildBase(maxSide, maxPixels) {
+    let cellW = Math.max.apply(null, panels.map(p => p.naturalWidth));
+    let cellH = Math.max.apply(null, panels.map(p => p.naturalHeight));
+    const shrink = Math.min(
+      1,
+      maxSide / (cellW * 2), maxSide / (cellH * 2),
+      Math.sqrt(maxPixels / (cellW * 2 * cellH * 2))
+    );
+    cellW = Math.max(1, Math.floor(cellW * shrink));
+    cellH = Math.max(1, Math.floor(cellH * shrink));
     const base = document.createElement('canvas');
     base.width = cellW * 2; base.height = cellH * 2;
     const ctx = base.getContext('2d');
@@ -992,7 +1030,26 @@
      panels, never from the previous output. So 3 steps means doing the
      shuffle 3 times on the base — NOT "shuffle whatever is on screen again".
      That's what makes the preview predictable: same settings → same picture.
+
+     makeRollage() is the recipe itself, at a chosen size. It only ever uses
+     TWO canvases, passing the picture back and forth between them like two
+     mixing bowls, instead of making a brand-new canvas for every pass (at
+     32 steps that used to be 65 big canvases per redraw).
   */
+  function makeRollage(maxSide, maxPixels) {
+    let current = buildBase(maxSide, maxPixels);   // step 1 of the recipe
+    let spare = document.createElement('canvas');  // the second "mixing bowl"
+    spare.width = current.width; spare.height = current.height;
+    const n = +cuts.value;
+    for (let s = 0; s < stepCount; s++) {          // then repeat the shuffle…
+      for (const axis of ['x', 'y']) {             // …on columns, then rows
+        interleavePass(current, spare, n, axis);
+        [current, spare] = [spare, current];       // swap bowls
+      }
+    }
+    return current;
+  }
+
   function render() {
     if (panels.some(p => !p) || rafPending) return;
     rafPending = true;
@@ -1001,13 +1058,8 @@
       cutsOut.textContent = cuts.value;
       stepsOut.textContent = stepCount;
 
-      let current = buildBase();              // step 1 of the recipe
-      for (let s = 0; s < stepCount; s++) {   // then repeat the shuffle…
-        current = interleavePass(current, +cuts.value, 'x'); // …on columns
-        current = interleavePass(current, +cuts.value, 'y'); // …on rows
-      }
-
-      outCanvas = current;
+      // The on-screen preview, capped so it stays quick (see PART 2).
+      outCanvas = makeRollage(PREVIEW_MAX_SIDE, EXPORT_MAX_PIXELS);
       outWrap.innerHTML = '';
       outWrap.appendChild(outCanvas);
       downloadBtn.disabled = false; // there's something to save now
@@ -1066,12 +1118,28 @@
     picture — so seams keep matching.
   */
   function assignPanel(slot, img, url) {
+    const old = panelUrls.slice(); // the addresses in use BEFORE this change
     if (slot === null || slot === undefined) {
       for (let i = 0; i < 4; i++) { panels[i] = img; panelUrls[i] = url; }
     } else {
       panels[slot] = img;
       panelUrls[slot] = url;
     }
+    // Return any old address that no slot uses any more (see releaseUrls).
+    releaseUrls(old);
+  }
+
+  /*
+    releaseUrls() hands unused blob URLs back to the browser. Each one keeps
+    its whole photo in memory until it's returned, so without this, every
+    re-upload or panel swap would quietly pile up memory.
+    The catch: one upload puts the SAME address in all four slots, so we
+    only return an address once NO slot is still using it.
+  */
+  function releaseUrls(urls) {
+    new Set(urls).forEach(u => {
+      if (u && !panelUrls.includes(u)) URL.revokeObjectURL(u);
+    });
   }
 
   /* ---------------------------------------------------------------------------
@@ -1098,7 +1166,10 @@
     }
     const blobUrl = URL.createObjectURL(file);
     const img = new Image();
+    const myGen = ++loadGen; // this load's ticket number (see loadGen in PART 2)
     img.onload = () => {
+      // A newer load or a Reset happened while we waited — this one is stale.
+      if (myGen !== loadGen) { URL.revokeObjectURL(blobUrl); return; }
       assignPanel(slot, img, blobUrl);
       if (!panelButtons.length) buildPanelGrid(); // first upload: build the grid once
       refreshThumbs();
@@ -1106,6 +1177,7 @@
     };
     img.onerror = () => {
       URL.revokeObjectURL(blobUrl); // give the temporary address back
+      if (myGen !== loadGen) return; // stale: don't show an old error
       const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
       showError(heic
         ? 'This is an HEIC photo. Chrome and Firefox cannot decode HEIC — in Preview or Photos, export it as JPEG or PNG first.'
@@ -1135,21 +1207,25 @@
     without it, the browser's default reaction to dropping a file is to
     navigate away and open it, losing the page. We politely say "no thanks,
     I'll handle it".
+
+    We listen on the WHOLE window, not just the dashed box: a picture
+    dropped a little off-target would otherwise open in the tab and wipe
+    out your work. Now a drop anywhere on the page simply loads it. The
+    dashed box still lights up, so it stays the obvious place to aim.
   */
-  for (const evt of ['dragenter', 'dragover']) {
-    dropzone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      dropzone.classList.add('over'); // light up the zone
-    });
-  }
-  for (const evt of ['dragleave', 'drop']) {
-    dropzone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      dropzone.classList.remove('over');
-    });
-  }
-  dropzone.addEventListener('drop', (e) => {
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('over');
     loadFile(e.dataTransfer.files && e.dataTransfer.files[0], null);
+  });
+  for (const evt of ['dragenter', 'dragover']) {
+    dropzone.addEventListener(evt, () => dropzone.classList.add('over')); // light up the zone
+  }
+  dropzone.addEventListener('dragleave', (e) => {
+    // Moving onto the box's own text also counts as "leaving" the box, so
+    // only switch the light off when the pointer has really gone outside it.
+    if (!dropzone.contains(e.relatedTarget)) dropzone.classList.remove('over');
   });
 
   /* Moving the Cuts slider or clicking − / + re-runs the recipe. */
@@ -1169,18 +1245,38 @@
 
     We also name the file with the settings used — "rollage-64cuts-4steps.png"
     — so saved experiments label themselves. No server involved, as usual.
+
+    FULL SIZE: the preview is shrunk for speed (PART 2), so for the download
+    we run the recipe again at full size. That can take a second on big
+    photos, so the button says "Preparing…" meanwhile. The setTimeout gives
+    the browser a moment to actually show that word before the hard work.
+
+    WHY WAIT BEFORE RETURNING THE ADDRESS? Some browsers (Safari, older
+    Firefox) start the download a beat AFTER the click. Returning the
+    temporary address instantly can cancel the download, so we wait a few
+    seconds first.
   */
   downloadBtn.addEventListener('click', () => {
-    if (!outCanvas) return;
-    outCanvas.toBlob((blob) => {
-      if (!blob) return; // extremely unlikely; just do nothing
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.download = 'rollage-' + cuts.value + 'cuts-' + stepCount + 'steps.png';
-      a.href = url;
-      a.click();
-      URL.revokeObjectURL(url); // hand the temporary address straight back
-    }, 'image/png');
+    if (!outCanvas || panels.some(p => !p)) return;
+    const label = downloadBtn.innerHTML;
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Preparing…';
+    setTimeout(() => {
+      const full = makeRollage(Infinity, EXPORT_MAX_PIXELS);
+      full.toBlob((blob) => {
+        downloadBtn.innerHTML = label;
+        downloadBtn.disabled = !outCanvas; // stays off if you hit Reset meanwhile
+        if (!blob) { showError('Sorry, the browser could not save this picture. Try fewer or smaller photos.'); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.download = 'rollage-' + cuts.value + 'cuts-' + stepCount + 'steps.png';
+        a.href = url;
+        document.body.appendChild(a); // some browsers only follow links that are on the page
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000); // hand the address back once it's safe
+      }, 'image/png');
+    }, 30);
   });
 
   /*
@@ -1189,11 +1285,14 @@
     temporary file addresses back so the memory can be reused.
   */
   resetBtn.addEventListener('click', () => {
-    panelUrls.forEach(u => { if (u) URL.revokeObjectURL(u); });
+    loadGen++; // any photo still loading is now stale and will be ignored
+    const old = panelUrls;
     panels = [null, null, null, null];
     panelUrls = [null, null, null, null];
+    releaseUrls(old);
     outCanvas = null;
     fileInput.value = '';
+    imgError.style.display = 'none'; // an old error no longer applies
     panelsWrap.innerHTML = '<span class="placeholder">Choose an image to begin</span>';
     panelButtons = [];
     outWrap.innerHTML = '<span class="placeholder">Output appears here</span>';
