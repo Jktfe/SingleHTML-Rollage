@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  ROLLAGE — a single-file web app that turns pictures into "rolled collages"
+  ============================================================================
+
+  WHAT IS A ROLLAGE?
+  ------------------
+  Imagine cutting a photo into thin strips, then sliding the strips around
+  so the outside strips and inside strips swap places, over and over, like
+  shuffling a deck of cards from both ends at once. Before you cut, you also
+  make four mirror copies of the photo and stick them into one big square,
+  so every edge matches its neighbour and the shuffles always line up
+  seamlessly. That is a rollage — and this app does it with code.
+
+  THE RECIPE (one "step" of the magic):
+    1. Mirror the picture into four panels (like folding a square of paper
+       twice). This becomes our new, bigger base image.
+    2. Cut the base into X vertical strips.
+    3. Reorder the strips from the ends inward: 1, 8, 2, 7, 3, 6, 4, 5.
+    4. Do the same trick with the rows (this is the same as turning the
+       paper 90° and cutting again).
+  Repeat steps 2–4 to make the effect deeper. That's the whole thing!
+
+  WHY IS THIS ONE SINGLE FILE?
+  ----------------------------
+  This whole app is just this one HTML file. No installs, no servers, no
+  accounts, no build tools. Everything happens inside YOUR browser, on YOUR
+  computer — your photos never get uploaded anywhere. You can email this
+  file to a friend and it just works. That is why every library-looking
+  thing in here is hand-written and small.
+
+  WANT TO TINKER?
+  ---------------
+  Open this file in any text editor, change something, save, and refresh the
+  browser. The interesting knobs are labelled in the comments below.
+  ============================================================================
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<!-- Makes the page fit phone screens properly instead of shrinking everything. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rollage</title>
+<style>
+  /*
+    ------------------------------------------------------------------
+    LOOK AND FEEL
+    ------------------------------------------------------------------
+    We use CSS "custom properties" (the --variables) so the colours are
+    defined once, at the top. Want a different vibe? Change these five
+    values and the whole app updates.
+  */
+  :root {
+    --bg: #f5f3ef;          /* warm paper-coloured page background   */
+    --card: #fff;           /* white cards that content sits on      */
+    --ink: #1d2530;         /* main text colour (almost black)       */
+    --muted: #6b7280;       /* grey for hints and captions           */
+    --accent: #0f766e;      /* the teal used for buttons and numbers */
+    --accent-ink: #fff;     /* text colour ON the teal buttons       */
+    --border: #d9d5cc;      /* thin borders around cards             */
+  }
+  * { box-sizing: border-box; } /* makes widths and padding behave predictably */
+  body {
+    margin: 0;
+    /*
+      A serif font (like a book) suits a craft-tool page. If Georgia is
+      missing (rare), the browser falls back to any serif it has.
+    */
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;       /* centre the app horizontally */
+    padding: 2rem 1rem 4rem;
+  }
+  main { width: min(960px, 100%); } /* never wider than 960px, but shrink on phones */
+  h1 { font-size: 2rem; margin: 0 0 .25rem; letter-spacing: .02em; }
+  p.lede { color: var(--muted); margin: 0 0 1.5rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .controls { display: grid; gap: 1.1rem; }
+  label { display: block; font-weight: 600; margin-bottom: .35rem; }
+  input[type="file"] { font-family: inherit; }
+
+  /*
+    The error box starts hidden (display: none) and JavaScript reveals it
+    when something goes wrong, e.g. you tried an HEIC iPhone photo that
+    the browser cannot decode.
+  */
+  .error { color: #b91c1c; font-size: .9rem; margin-top: .4rem; display: none; }
+
+  /*
+    The dashed drop zone: a friendly second way to add an image. It lights
+    up (.over) when you drag a file over it, so you know drop will work.
+  */
+  .dropzone {
+    margin-top: .6rem;
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: .9rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  .dropzone.over { border-color: var(--accent); color: var(--accent); background: #f0faf8; }
+
+  /*
+    The Cuts slider: number sits beside the slider. tabular-nums means
+    every digit is the same width, so "8" -> "128" doesn't make the
+    number jiggle sideways.
+  */
+  .slider-row { display: flex; align-items: center; gap: .9rem; }
+  .slider-row output {
+    min-width: 3ch;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  /*
+    The Steps stepper (the − and + buttons).
+    WHY A STEPPER AND NOT A SLIDER? Steps have a small range (1–32) and
+    each one is a big, meaningful change — like oven settings. Buttons
+    make each increase feel deliberate, and you can't overshoot.
+  */
+  .stepper { display: flex; align-items: center; gap: .9rem; }
+  .stepper button {
+    width: 2.2rem; height: 2.2rem;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+  .stepper output {
+    min-width: 3ch;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+
+  .hint { font-size: .85rem; color: var(--muted); margin-top: .2rem; }
+  .actions { display: flex; gap: .75rem; margin-top: 1rem; }
+  button {
+    font: inherit;
+    font-weight: 700;
+    padding: .55rem 1.1rem;
+    border-radius: 999px;           /* pill-shaped buttons */
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+    cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); } /* outline-only style */
+  button:disabled { opacity: .45; cursor: default; }              /* greyed out when unusable */
+
+  /* The two big panes (Panels and Output) sit side by side on wide screens… */
+  .panes { display: grid; gap: 1.25rem; grid-template-columns: 1fr 1fr; }
+  /* …and stack on top of each other on narrow ones (like phones). */
+  @media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
+
+  figure { margin: 0; }
+  figcaption { font-size: .85rem; color: var(--muted); margin-bottom: .5rem; }
+
+  /*
+    The checkerboard background behind images is the classic "this area is
+    transparent" signal used by art programs. Here it just says "picture
+    goes here". It's pure CSS — a repeating 16px chequer pattern.
+  */
+  .imgwrap {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 160px;
+  }
+  .imgwrap canvas { max-width: 100%; height: auto; display: block; }
+  .placeholder { color: var(--muted); font-size: .9rem; padding: 2rem; }
+
+  /* The footer link back to the source code. Small and quiet — it's info,
+     not a call to action. */
+  footer {
+    text-align: center;
+    font-size: .85rem;
+    color: var(--muted);
+    margin-top: 2rem;
+  }
+  footer a { color: var(--accent); }
+
+  /*
+    THE PANEL GRID — the four mirrored quadrants, each one clickable.
+    Each panel keeps its mirror flip ON THE THUMBNAIL too (with a CSS
+    transform), so what you see is exactly what goes into the rollage.
+  */
+  .panelgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .5rem;
+    width: 100%;
+    padding: .5rem;
+  }
+  .panel {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0;
+    background: none;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .panel:hover { border-color: var(--accent); } /* highlight the panel you're pointing at */
+  .panel img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;   /* every thumbnail is a square… */
+    object-fit: cover;     /* …filled edge to edge, cropping the overflow */
+  }
+  /*
+    The three mirror flips, done with CSS transforms so thumbnails show
+    the real orientation:
+      fliph = flip horizontally (left becomes right)
+      flipv = flip vertically (top becomes bottom)
+      flipb = flip both ways (a 180° rotation's mirror cousin)
+  */
+  .panel img.fliph { transform: scaleX(-1); }
+  .panel img.flipv { transform: scaleY(-1); }
+  .panel img.flipb { transform: scale(-1, -1); }
+  .panel .cap {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: .2rem .45rem;
+    font-size: .72rem;
+    color: #fff;
+    background: rgba(0, 0, 0, .55); /* dark ribbon so the label reads over any image */
+    text-align: left;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Rollage</h1>
+  <p class="lede">Mirror an image into four panels, slice it into strips, and interleave them from the ends inward.</p>
+
+  <!--
+    ==========================================================================
+    THE CONTROLS
+    ==========================================================================
+    Three things the user chooses:
+      Image — which picture(s) to roll
+      Cuts  — how many strips to slice per pass (2–256)
+      Steps — how many times to repeat the slice-and-shuffle (1–32)
+  -->
+  <section class="card controls">
+    <div>
+      <label for="file">Image</label>
+      <!--
+        The "accept" list matters: these are the image formats every modern
+        browser can read. We deliberately do NOT accept HEIC (iPhone photos)
+        because Chrome and Firefox cannot decode it — trying would just fail
+        silently. Better to say no up front than to fail mysteriously.
+      -->
+      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp">
+      <!-- A hidden second file picker, used for replacing ONE panel at a time. -->
+      <input type="file" id="panelFile" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp" hidden>
+      <div class="dropzone" id="dropzone">…or drag an image file here</div>
+      <div class="error" id="imgError"></div>
+    </div>
+    <div>
+      <label for="cuts">Cuts</label>
+      <div class="slider-row">
+        <input type="range" id="cuts" min="2" max="256" value="8">
+        <output id="cutsOut">8</output>
+      </div>
+      <div class="hint">How many strips each pass slices the image into.</div>
+    </div>
+    <div>
+      <label>Steps</label>
+      <div class="stepper">
+        <button type="button" id="stepsDown" aria-label="Fewer steps">−</button>
+        <output id="stepsOut">1</output>
+        <button type="button" id="stepsUp" aria-label="More steps">+</button>
+      </div>
+      <div class="hint">How many times the slice-and-interleave pass is repeated (vertical + horizontal per step). Range 1–32.</div>
+    </div>
+    <div class="actions">
+      <button id="download" disabled>Download PNG</button>
+      <button id="reset" class="ghost" disabled>Reset</button>
+    </div>
+  </section>
+
+  <div class="panes">
+    <figure class="card">
+      <figcaption>Panels — the four mirrored quadrants. Click one to swap in a different image and roll four images into one.</figcaption>
+      <div class="imgwrap" id="panelsWrap"><span class="placeholder">Choose an image to begin</span></div>
+    </figure>
+    <figure class="card">
+      <figcaption>Rollage output</figcaption>
+      <div class="imgwrap" id="outWrap"><span class="placeholder">Output appears here</span></div>
+    </figure>
+  </div>
+</main>
+
+<!--
+  A link back to the public repository, so anyone who finds this page can
+  read the source code (it's all in this one file anyway!).
+-->
+<footer>
+  Rollage is a single-file app — <a href="https://github.com/Jktfe/SingleHTML-Rollage">view the source on GitHub</a>.
+</footer>
+
+<script>
+/*
+  ==============================================================================
+  THE BRAIN OF THE APP (plain JavaScript — no libraries)
+  ==============================================================================
+
+  HOW TO READ THIS FILE IF YOU'RE NEW TO CODE:
+  - "const x = ..." makes a named box that doesn't change (a constant).
+  - "let x = ..." makes a named box whose contents CAN change later.
+  - "function name(args) { ... }" is a recipe we can run by name.
+  - document.getElementById('file') grabs an element from the HTML above.
+
+  The whole script is wrapped in one big function — written as
+  (function () { ... })(); — so our variable names stay private inside the
+  file and can never accidentally clash with another script.
+*/
+(function () {
+
+  /* ---------------------------------------------------------------------------
+     PART 1 — GRAB THE PAGE ELEMENTS WE'LL TALK TO
+     ---------------------------------------------------------------------------
+     We look up every button, slider, and box ONCE and keep a reference, so
+     later code can say "stepsOut.textContent = ..." instead of hunting for
+     the element every time.
+  */
+  const fileInput  = document.getElementById('file');       // main image picker
+  const panelFile  = document.getElementById('panelFile');  // hidden picker for swapping one panel
+  const cuts       = document.getElementById('cuts');       // the Cuts slider
+  const cutsOut    = document.getElementById('cutsOut');    // the number next to the slider
+  const stepsOut   = document.getElementById('stepsOut');   // the number between − and +
+  const stepsDown  = document.getElementById('stepsDown');  // the − button
+  const stepsUp    = document.getElementById('stepsUp');    // the + button
+  const panelsWrap = document.getElementById('panelsWrap'); // where the 4 panel thumbnails live
+  const outWrap    = document.getElementById('outWrap');    // where the finished rollage appears
+  const downloadBtn = document.getElementById('download');
+  const resetBtn    = document.getElementById('reset');
+  const imgError    = document.getElementById('imgError');
+  const dropzone    = document.getElementById('dropzone');
+
+  /* ---------------------------------------------------------------------------
+     PART 2 — THE APP'S MEMORY (its "state")
+     ---------------------------------------------------------------------------
+
+     THE FOUR PANELS, always in this order:
+
+         ┌─────────┬──────────┐
+         │ 0 = TL  │ 1 = TR   │   TL = top-left     — shown exactly as-is
+         │ normal  │ flip H   │   TR = top-right    — flipped horizontally
+         ├─────────┼──────────┤   BL = bottom-left  — flipped vertically
+         │ 2 = BL  │ 3 = BR   │   BR = bottom-right — flipped both ways
+         │ flip V  │ flip both│
+         └─────────┴──────────┘
+
+     WHY MIRROR AT ALL? A rollage shuffles strips. If the four quadrants are
+     mirrors of each other, every outer edge of one panel matches the inner
+     edge of its neighbour — so the seams disappear and the shuffle always
+     tiles perfectly. It's the same trick as mirror-folding paper before
+     cutting a snowflake.
+  */
+  const ORIENT = [
+    { x:  1, y:  1, cls: '',      cap: 'Top left' },               // as-is
+    { x: -1, y:  1, cls: 'fliph', cap: 'Top right · mirrored' },   // flipped L↔R
+    { x:  1, y: -1, cls: 'flipv', cap: 'Bottom left · mirrored' }, // flipped T↔B
+    { x: -1, y: -1, cls: 'flipb', cap: 'Bottom right · mirrored' } // flipped both ways
+  ];
+
+  /*
+    STEPS LIMITS: 1 to 32.
+    Each step is two full shuffle passes (vertical strips, then rows), so 32
+    steps is already 64 passes — plenty deep before the image turns to
+    uniform-looking noise. A hard limit also guards against someone (possibly
+    a curious kid) holding the + button and wondering why the tab froze.
+  */
+  const STEPS_MIN = 1, STEPS_MAX = 32;
+
+  /*
+    The changeable memory:
+    - panels[]    : the decoded image for each of the 4 slots (null = empty)
+    - panelUrls[] : a "blob URL" per slot — a special web address the browser
+                    makes for a file on YOUR computer, so thumbnails can use
+                    it without copying the image anywhere
+    - outCanvas   : the finished rollage (a <canvas> is a drawable picture)
+    - replaceSlot : which panel you're replacing when you click one
+    - rafPending  : a flag meaning "a re-draw is already queued" (see render)
+    - panelButtons: the 4 <img> thumbnails, kept so we can update their src
+  */
+  let stepCount = 1;
+  let panels = [null, null, null, null];
+  let panelUrls = [null, null, null, null];
+  let outCanvas = null;
+  let replaceSlot = null;
+  let rafPending = false;
+  let panelButtons = [];
+
+  /* ---------------------------------------------------------------------------
+     PART 3 — THE STEPPER (− and + buttons)
+     ---------------------------------------------------------------------------
+     setSteps() is the ONE AND ONLY place the step count changes, which means
+     the number shown, the button greying-out, and the re-draw can never
+     disagree with each other.
+
+     We update the visible number RIGHT HERE rather than waiting for render(),
+     because if no image is loaded yet, render() does nothing — and the number
+     should still move when you click +. (That was a real bug once!)
+  */
+  function setSteps(n) {
+    stepCount = Math.max(STEPS_MIN, Math.min(STEPS_MAX, n)); // clamp into 1–32
+    stepsOut.textContent = stepCount;
+    // Grey out a button when you reach its end — a hint that you're at the limit.
+    stepsDown.disabled = stepCount <= STEPS_MIN;
+    stepsUp.disabled   = stepCount >= STEPS_MAX;
+    render();
+  }
+
+  /* Show a friendly red message when an image can't be used. */
+  function showError(msg) {
+    imgError.textContent = msg;
+    imgError.style.display = 'block';
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 4 — THE HEART OF THE ROLLAGE: SHUFFLING STRIPS FROM THE ENDS INWARD
+     ---------------------------------------------------------------------------
+
+     interleaveMap(n) answers: "for each output slot, which input strip goes
+     there?" For 8 strips the answer is:
+
+         input strips:   1   2   3   4   5   6   7   8
+         output order:   1   8   2   7   3   6   4   5
+                         ↑       ↑       ↑       ↑
+                         left,   right,  left+1, right-1 …
+
+     We count positions from 0 (computers like that), so strip "1" is index 0.
+     Two pointers walk toward each other: `lo` from the left end, `hi` from
+     the right. Even slots take from `lo`, odd slots take from `hi`.
+  */
+  function interleaveMap(n) {
+    const map = new Array(n);
+    let lo = 0, hi = n - 1;
+    for (let i = 0; i < n; i++) {
+      map[i] = (i % 2 === 0) ? lo++ : hi--;
+    }
+    return map;
+  }
+
+  /*
+    interleavePass() performs ONE cut-and-shuffle, either vertically or
+    horizontally.
+
+    HOW CANVAS DRAWING WORKS HERE: drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
+    means "copy an sw×sh piece starting at (sx,sy) out of the source picture,
+    and paste it at (dx,dy) sized dw×dh". So we walk down the shuffled order
+    and paste each strip into its new home.
+
+    NOTE: strip widths can be fractions (e.g. a 1000px image in 7 cuts gives
+    142.857px strips). Canvas copes with fractions smoothly, so we don't
+    bother rounding. No glitches, no maths headaches.
+  */
+  function interleavePass(src, numCuts, axis) {
+    const w = src.width, h = src.height;
+    const dest = document.createElement('canvas'); // a fresh, invisible canvas
+    dest.width = w; dest.height = h;
+    const dctx = dest.getContext('2d');
+    const map = interleaveMap(numCuts);
+    for (let i = 0; i < numCuts; i++) {
+      const s0 = map[i];
+      if (axis === 'x') {
+        const sw = w / numCuts; // strip width
+        dctx.drawImage(src, s0 * sw, 0, sw, h,   i * sw, 0, sw, h);
+      } else {
+        const sh = h / numCuts; // strip height
+        dctx.drawImage(src, 0, s0 * sh, w, sh,   0, i * sh, w, sh);
+      }
+    }
+    return dest;
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 5 — BUILDING THE MIRRORED BASE IMAGE
+     ---------------------------------------------------------------------------
+
+     coverDraw() pastes one panel's image into its rectangular cell:
+       - "cover" means: scale up until the cell is completely filled, cropping
+         whatever spills over (exactly how CSS `object-fit: cover` behaves).
+       - then apply that panel's mirror flip.
+
+     WHY CROP INSTEAD OF STRETCH? If the user mixes four photos of different
+     shapes, stretching would squish faces. Cropping keeps everything looking
+     normal — you just lose a sliver off the long edges.
+
+     HOW THE FLIP WORKS: we shift (translate) the drawing origin to the
+     panel's far edge, then scale by −1, which mirrors everything drawn
+     afterwards. Think of drawing on the back of a transparency and flipping
+     the sheet over.
+  */
+  function coverDraw(ctx, img, x, y, w, h, flipX, flipY) {
+    const iw = img.naturalWidth, ih = img.naturalHeight;  // the photo's true size
+    const scale = Math.max(w / iw, h / ih);               // enough to cover the cell
+    const sw = w / scale, sh = h / scale;                 // the piece of photo we'll use
+    const sx = (iw - sw) / 2, sy = (ih - sh) / 2;         // centred, so cropping is even
+    ctx.save();
+    ctx.translate(x + (flipX ? w : 0), y + (flipY ? h : 0));
+    ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+    ctx.restore(); // undo the flip so the NEXT panel draws normally
+  }
+
+  /*
+    buildBase() sticks the four panels into one big canvas, twice as wide and
+    twice as tall as a single cell. All cells are the same size — the largest
+    of the four images wins — so the grid stays tidy even with mixed photos.
+  */
+  function buildBase() {
+    const cellW = Math.max.apply(null, panels.map(p => p.naturalWidth));
+    const cellH = Math.max.apply(null, panels.map(p => p.naturalHeight));
+    const base = document.createElement('canvas');
+    base.width = cellW * 2; base.height = cellH * 2;
+    const ctx = base.getContext('2d');
+    panels.forEach((img, i) => {
+      const o = ORIENT[i];
+      coverDraw(ctx, img, (i % 2) * cellW, (i < 2 ? 0 : cellH), cellW, cellH, o.x < 0, o.y < 0);
+    });
+    return base;
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 6 — PUTTING IT ALL TOGETHER (the render loop)
+     ---------------------------------------------------------------------------
+
+     render() runs the full recipe and shows the result. Two rules:
+
+     1. If the four panels aren't all loaded yet, do nothing. (Before your
+        first upload there's simply nothing to draw.)
+     2. "rafPending" batches redraws with requestAnimationFrame, the browser's
+        way of saying "run this just before the next screen refresh". If you
+        drag the Cuts slider quickly, we don't redraw 50 times — each queued
+        redraw reads the LATEST slider values, so rapid changes collapse into
+        one draw. Cheap and smooth.
+
+     One subtle design choice: the redraw always starts from freshly built
+     panels, never from the previous output. So 3 steps means doing the
+     shuffle 3 times on the base — NOT "shuffle whatever is on screen again".
+     That's what makes the preview predictable: same settings → same picture.
+  */
+  function render() {
+    if (panels.some(p => !p) || rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      cutsOut.textContent = cuts.value;
+      stepsOut.textContent = stepCount;
+
+      let current = buildBase();              // step 1 of the recipe
+      for (let s = 0; s < stepCount; s++) {   // then repeat the shuffle…
+        current = interleavePass(current, +cuts.value, 'x'); // …on columns
+        current = interleavePass(current, +cuts.value, 'y'); // …on rows
+      }
+
+      outCanvas = current;
+      outWrap.innerHTML = '';
+      outWrap.appendChild(outCanvas);
+      downloadBtn.disabled = false; // there's something to save now
+      resetBtn.disabled = false;
+    });
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 7 — THE PANEL THUMBNAILS (the four previews you can click)
+     ---------------------------------------------------------------------------
+     buildPanelGrid() creates the 2×2 grid of clickable thumbnails. Each thumb
+     gets the right CSS flip class, so the preview mirrors the panel exactly
+     as the rollage will use it. Clicking one opens the hidden file picker;
+     `replaceSlot` remembers WHICH panel we're swapping.
+  */
+  function buildPanelGrid() {
+    panelsWrap.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'panelgrid';
+    panelButtons = [];
+    ORIENT.forEach((o, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'panel';
+      btn.title = 'Replace this panel';
+      const img = document.createElement('img');
+      img.className = o.cls;
+      img.alt = o.cap;
+      const cap = document.createElement('span');
+      cap.className = 'cap';
+      cap.textContent = o.cap;
+      btn.appendChild(img);
+      btn.appendChild(cap);
+      btn.addEventListener('click', () => {
+        replaceSlot = i;
+        panelFile.click(); // programmatically open the hidden picker
+      });
+      grid.appendChild(btn);
+      panelButtons.push(img);
+    });
+    panelsWrap.appendChild(grid);
+  }
+
+  /* Point each thumbnail's <img> at its blob URL. */
+  function refreshThumbs() {
+    panelButtons.forEach((img, i) => {
+      if (panelUrls[i]) img.src = panelUrls[i];
+    });
+  }
+
+  /*
+    assignPanel() — the "one image = four panels" trick happens here.
+    Upload a fresh image (slot = null): the SAME image goes into all four
+    slots, and the mirror flips do the rest. Replace one panel (slot = 0–3):
+    only that slot changes, and its flip stays attached to the slot, not the
+    picture — so seams keep matching.
+  */
+  function assignPanel(slot, img, url) {
+    if (slot === null || slot === undefined) {
+      for (let i = 0; i < 4; i++) { panels[i] = img; panelUrls[i] = url; }
+    } else {
+      panels[slot] = img;
+      panelUrls[slot] = url;
+    }
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 8 — LOADING FILES SAFELY
+     ---------------------------------------------------------------------------
+     loadFile() is the bouncer at the door. Before an image joins the party:
+
+       - Is it actually an image? (You could drag a spreadsheet in by mistake.)
+       - Can the browser DECODE it? This is where HEIC iPhone photos fail in
+         Chrome/Firefox. Without the onerror check, the app would just sit
+         there silently — the worst kind of bug. Instead we explain exactly
+         what happened and how to fix it (export as JPEG/PNG).
+
+     A blob URL (URL.createObjectURL) is how we hand a local file to the page
+     without uploading it or copying it: the browser invents a temporary
+     private address for the file on your machine.
+  */
+  function loadFile(file, slot) {
+    if (!file) return;
+    imgError.style.display = 'none';
+    if (!file.type.startsWith('image/')) {
+      showError('That does not look like an image file (got “' + (file.type || file.name) + '”).');
+      return;
+    }
+    const blobUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      assignPanel(slot, img, blobUrl);
+      if (!panelButtons.length) buildPanelGrid(); // first upload: build the grid once
+      refreshThumbs();
+      render();
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(blobUrl); // give the temporary address back
+      const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+      showError(heic
+        ? 'This is an HEIC photo. Chrome and Firefox cannot decode HEIC — in Preview or Photos, export it as JPEG or PNG first.'
+        : 'Could not decode this file as an image (“' + file.name + '”). Try a PNG, JPEG or WebP.');
+    };
+    img.src = blobUrl; // starting the load happens LAST, after both handlers exist
+  }
+
+  /* ---------------------------------------------------------------------------
+     PART 9 — WIRING UP THE PAGE (who calls what)
+     ---------------------------------------------------------------------------
+     "addEventListener" means "when this thing happens on that element, run
+     this function". Read each line like a sentence:
+       "file input, when you change, load the picked file as a new image."
+  */
+  fileInput.addEventListener('change', () => {
+    loadFile(fileInput.files && fileInput.files[0], null); // null = all four panels
+  });
+
+  panelFile.addEventListener('change', () => {
+    loadFile(panelFile.files && panelFile.files[0], replaceSlot); // one panel only
+    panelFile.value = ''; // clearing lets you pick the SAME file twice in a row
+  });
+
+  /*
+    Drag-and-drop on the drop zone. dragover must be "preventDefault"-ed —
+    without it, the browser's default reaction to dropping a file is to
+    navigate away and open it, losing the page. We politely say "no thanks,
+    I'll handle it".
+  */
+  for (const evt of ['dragenter', 'dragover']) {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('over'); // light up the zone
+    });
+  }
+  for (const evt of ['dragleave', 'drop']) {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('over');
+    });
+  }
+  dropzone.addEventListener('drop', (e) => {
+    loadFile(e.dataTransfer.files && e.dataTransfer.files[0], null);
+  });
+
+  /* Moving the Cuts slider or clicking − / + re-runs the recipe. */
+  cuts.addEventListener('input', render);
+  stepsDown.addEventListener('click', () => setSteps(stepCount - 1));
+  stepsUp.addEventListener('click', () => setSteps(stepCount + 1));
+
+  /*
+    Download: canvas.toBlob() turns the picture into a file-like object, and
+    URL.createObjectURL() gives it a temporary address. We put that on an
+    invisible link, pretend to click it, and the browser saves the PNG.
+
+    WHY toBlob AND NOT toDataURL? toDataURL copies the whole picture into a
+    giant piece of text first, which can break or freeze the tab on really
+    big rollages (think a 4000px photo at 32 steps = an 8000px image).
+    toBlob skips the text detour entirely. Same click, stronger engine.
+
+    We also name the file with the settings used — "rollage-64cuts-4steps.png"
+    — so saved experiments label themselves. No server involved, as usual.
+  */
+  downloadBtn.addEventListener('click', () => {
+    if (!outCanvas) return;
+    outCanvas.toBlob((blob) => {
+      if (!blob) return; // extremely unlikely; just do nothing
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = 'rollage-' + cuts.value + 'cuts-' + stepCount + 'steps.png';
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url); // hand the temporary address straight back
+    }, 'image/png');
+  });
+
+  /*
+    Reset: wipe everything back to the starting state. We also revoke the
+    blob URLs — it's like returning a library book, handing the browser's
+    temporary file addresses back so the memory can be reused.
+  */
+  resetBtn.addEventListener('click', () => {
+    panelUrls.forEach(u => { if (u) URL.revokeObjectURL(u); });
+    panels = [null, null, null, null];
+    panelUrls = [null, null, null, null];
+    outCanvas = null;
+    fileInput.value = '';
+    panelsWrap.innerHTML = '<span class="placeholder">Choose an image to begin</span>';
+    panelButtons = [];
+    outWrap.innerHTML = '<span class="placeholder">Output appears here</span>';
+    downloadBtn.disabled = true;
+    resetBtn.disabled = true;
+  });
+
+  /*
+    LAST LINE: set the stepper's starting state (number "1", − greyed out).
+    We do this at the very END of the script on purpose: setSteps() calls
+    render(), which reads the state variables — and JavaScript's `let`
+    variables only exist after their line runs. Calling this early was a real
+    bug that broke uploads entirely; at the bottom, everything is ready.
+  */
+  setSteps(stepCount);
+})();
+</script>
+</body>
+</html>
